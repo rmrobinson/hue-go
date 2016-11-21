@@ -170,7 +170,7 @@ func (b *Bridge) Sensor(id string) (sensor Sensor, err error) {
 	return
 }
 
-func (b *Bridge) SetSensor(id string, args SensorArg) (err error) {
+func (b *Bridge) SetSensor(id string, args *SensorArg) (err error) {
 	if !b.isAvailable() {
 		err = errors.New("Bridge is not yet ready")
 		return
@@ -243,7 +243,7 @@ func (b *Bridge) SetSensor(id string, args SensorArg) (err error) {
 	return
 }
 
-func (b *Bridge) SetSensorConfig(id string, args SensorConfigArg) (err error) {
+func (b *Bridge) SetSensorConfig(id string, args *SensorConfigArg) (err error) {
 	if !b.isAvailable() {
 		err = errors.New("Bridge is not yet ready")
 		return
@@ -344,7 +344,7 @@ func (b *Bridge) SetSensorConfig(id string, args SensorConfigArg) (err error) {
 	return
 }
 
-func (b *Bridge) SetSensorState(id string, args SensorStateArg) (err error) {
+func (b *Bridge) SetSensorState(id string, args *SensorStateArg) (err error) {
 	if !b.isAvailable() {
 		err = errors.New("Bridge is not yet ready")
 		return
