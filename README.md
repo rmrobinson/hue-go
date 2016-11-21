@@ -8,6 +8,7 @@ The library currently supports the following Hue API endpoints:
  * Config
 
 The library supports auto-detection of bridges using the Locator functionality.
+
 The library supports auto-update of bridges using the Updater functionality.
 
 ## Usage
@@ -29,7 +30,7 @@ The locator has 3 possible ways to locate bridges:
  * UPnP on the current network
  * N-UPnP
 
- An example of this can be found in examples/hue_locator
+An example of this can be found in examples/hue_locator
 
 It is possible to automatically update each Bridge by creating an instance of the hue_go.Updater object, then calling Run() in a goroutine.
 This updater will poll the bridge once an hour to determine if there is an update available; if there is it will automatically apply the update then continue monitoring for future updates.
