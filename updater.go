@@ -1,4 +1,4 @@
-package hue_go
+package hue
 
 import (
 	"errors"
@@ -7,14 +7,21 @@ import (
 )
 
 const (
-	NO_UPDATE_AVAILABLE       = 0
-	DOWNLOADING_SYSTEM_UPDATE = 1
-	SYSTEM_UPDATE_AVAILABLE   = 2
-	SYSTEM_UPDATING           = 3
-	LAST_REQUEST_FAILED       = 10
-	NETWORK_UNAVAILABLE       = 11
+	// NoUpdateAvailable represents an up-to-date bridge
+	NoUpdateAvailable       = 0
+	// DownloadingSystemUpdate represents a bridge downloading a system update
+	DownloadingSystemUpdate = 1
+	// SystemUpdateAvailable represents a bridge with a system update ready to be applied
+	SystemUpdateAvailable   = 2
+	// SystemUpdating represents a bridge that is actively updating itself
+	SystemUpdating          = 3
+	// LastRequestFailed represents a bridge that failed to execute its previous command
+	LastRequestFailed       = 10
+	// NetworkUnavailable represents a bridge unable to update because it lacks Internet connectivity
+	NetworkUnavailable      = 11
 )
 
+// Updater is an instance of a Hue bridge updater.
 type Updater struct {
 	bridge *Bridge
 	state  int32
@@ -25,17 +32,20 @@ type Updater struct {
 	msg string
 }
 
+// NewUpdater creates a new bridge updater from the specified Hue bridge.
 func NewUpdater(b *Bridge) Updater {
 	return Updater{
 		bridge: b,
-		state:  NO_UPDATE_AVAILABLE,
+		state:  NoUpdateAvailable,
 	}
 }
 
+// State exposes the current state of the updater.
 func (u *Updater) State() int32 {
 	return u.state
 }
 
+// Run begins the process of monitoring a bridge for updates then applying them.
 func (u *Updater) Run(results chan string, quit chan interface{}) {
 	ticker := time.NewTicker(60 * time.Minute)
 
@@ -43,24 +53,24 @@ func (u *Updater) Run(results chan string, quit chan interface{}) {
 		select {
 		case <-ticker.C:
 			switch u.state {
-			case NO_UPDATE_AVAILABLE, DOWNLOADING_SYSTEM_UPDATE:
+			case NoUpdateAvailable, DownloadingSystemUpdate:
 				newState := u.checkForUpdate()
 
 				if newState == u.state {
 					break
-				} else if newState == LAST_REQUEST_FAILED {
+				} else if newState == LastRequestFailed {
 					results <- "Error checking for updates: " + u.err.Error()
 					break
-				} else if newState == DOWNLOADING_SYSTEM_UPDATE {
+				} else if newState == DownloadingSystemUpdate {
 					results <- u.msg
-				} else if newState == SYSTEM_UPDATE_AVAILABLE {
+				} else if newState == SystemUpdateAvailable {
 					results <- u.msg
 
 					newState = u.executeUpdate()
 
-					if newState == LAST_REQUEST_FAILED {
+					if newState == LastRequestFailed {
 						results <- "Error applying update: " + u.err.Error()
-						u.state = SYSTEM_UPDATE_AVAILABLE
+						u.state = SystemUpdateAvailable
 						break
 					} else {
 						results <- u.msg
@@ -69,17 +79,17 @@ func (u *Updater) Run(results chan string, quit chan interface{}) {
 
 				u.state = newState
 
-			case SYSTEM_UPDATE_AVAILABLE:
+			case SystemUpdateAvailable:
 				newState := u.executeUpdate()
 
-				if newState == LAST_REQUEST_FAILED {
+				if newState == LastRequestFailed {
 					results <- "Error applying update: " + u.err.Error()
 				} else {
 					results <- u.msg
 					u.state = newState
 				}
 
-			case SYSTEM_UPDATING:
+			case SystemUpdating:
 			default:
 			}
 
@@ -92,20 +102,18 @@ func (u *Updater) Run(results chan string, quit chan interface{}) {
 
 func (u *Updater) checkForUpdate() int32 {
 	config, err := u.bridge.Config()
-
 	if err != nil {
 		u.err = err
-		return LAST_REQUEST_FAILED
+		return LastRequestFailed
 	} else if !config.PortalState.SignedOn {
-		return NETWORK_UNAVAILABLE
+		return NetworkUnavailable
 	}
 
 	if config.SwUpdate.State == 0 || config.SwUpdate.State == 1 {
 		err = u.bridge.CheckForUpdate()
-
 		if err != nil {
 			u.err = err
-			return LAST_REQUEST_FAILED
+			return LastRequestFailed
 		}
 
 		itr := 0
@@ -116,14 +124,14 @@ func (u *Updater) checkForUpdate() int32 {
 
 			if err != nil {
 				u.err = err
-				return LAST_REQUEST_FAILED
+				return LastRequestFailed
 			}
 
 			if checkConfig.SwUpdate.CheckForUpdates && itr < 5 {
 				itr++
 				continue
 			} else if checkConfig.SwUpdate.CheckForUpdates {
-				return NO_UPDATE_AVAILABLE
+				return NoUpdateAvailable
 			}
 
 			// Here checkForUpdates has gone back to false, and we aren't past the timeout,
@@ -136,28 +144,27 @@ func (u *Updater) checkForUpdate() int32 {
 	switch config.SwUpdate.State {
 	case 0:
 		u.msg = ""
-		return NO_UPDATE_AVAILABLE
+		return NoUpdateAvailable
 	case 1:
 		u.msg = "Downloading update"
-		return DOWNLOADING_SYSTEM_UPDATE
+		return DownloadingSystemUpdate
 	case 2:
 		u.msg = "Update available: " + config.SwUpdate.UpdateSummary
-		return SYSTEM_UPDATE_AVAILABLE
+		return SystemUpdateAvailable
 	case 3:
 		u.msg = "Applying " + config.SwUpdate.UpdateSummary
-		return SYSTEM_UPDATING
+		return SystemUpdating
 	default:
 		u.msg = fmt.Sprintf("Unknown state detected: %d\n", config.SwUpdate.State)
-		return LAST_REQUEST_FAILED
+		return LastRequestFailed
 	}
 }
 
 func (u *Updater) executeUpdate() int32 {
 	startingConfig, err := u.bridge.Config()
-
 	if err != nil {
 		u.err = err
-		return LAST_REQUEST_FAILED
+		return LastRequestFailed
 	}
 
 	u.bridge.updateInProgress = true
@@ -166,13 +173,12 @@ func (u *Updater) executeUpdate() int32 {
 	}()
 
 	err = u.bridge.StartUpdate()
-
 	if err != nil {
 		u.err = err
-		return LAST_REQUEST_FAILED
+		return LastRequestFailed
 	}
 
-	u.state = SYSTEM_UPDATING
+	u.state = SystemUpdating
 
 	itr := 0
 	for {
@@ -186,7 +192,7 @@ func (u *Updater) executeUpdate() int32 {
 			continue
 		} else if err != nil {
 			u.err = err
-			return LAST_REQUEST_FAILED
+			return LastRequestFailed
 		}
 
 		if !checkConfig.SwUpdate.NotifyUser && itr < 5 {
@@ -196,7 +202,7 @@ func (u *Updater) executeUpdate() int32 {
 			// We assume that things have changed, even if we don't explicitly detect it, when the API versions change.
 			if checkConfig.SwVersion == startingConfig.SwVersion {
 				u.err = errors.New("Failed to update")
-				return LAST_REQUEST_FAILED
+				return LastRequestFailed
 			}
 		}
 
@@ -206,10 +212,10 @@ func (u *Updater) executeUpdate() int32 {
 		// We don't care if it fails; we still consider the update to be complete.
 		_ = u.bridge.FinishUpdate()
 
-		u.msg = "Bridge updated to " + checkConfig.ApiVersion
+		u.msg = "Bridge updated to " + checkConfig.APIVersion
 		return checkConfig.SwUpdate.State
 	}
 
-	u.err = errors.New("Unknown state detected")
-	return LAST_REQUEST_FAILED
+	u.err = errors.New("unknown state detected")
+	return LastRequestFailed
 }

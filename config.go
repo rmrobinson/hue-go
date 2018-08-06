@@ -1,4 +1,4 @@
-package hue_go
+package hue
 
 import (
 	"bytes"
@@ -8,17 +8,25 @@ import (
 	"strings"
 )
 
+var (
+	// ErrBridgeNotAvailable is returned if the specified bridge is not yet configured for access.
+	ErrBridgeNotAvailable = errors.New("bridge is not yet ready")
+	// ErrBridgeUpdating is returned if the specified bridge is currently being updated.
+	ErrBridgeUpdating = errors.New("bridge is currently being updated")
+)
+
+// Config represents an instance of a Hue bridge's configuration.
 type Config struct {
 	Name string `json:"name"`
-	Id   string `json:"bridgeid"`
+	ID   string `json:"bridgeid"`
 
 	SwVersion    string `json:"swversion"`
-	ApiVersion   string `json:"apiversion"`
+	APIVersion   string `json:"apiversion"`
 	ModelVersion string `json:"modelid"`
 
 	LinkButton     bool   `json:"linkbutton"`
-	IpAddress      string `json:"ipaddress"`
-	MacAddress     string `json:"mac"`
+	IPAddress      string `json:"ipaddress"`
+	MACAddress     string `json:"mac"`
 	SubnetMask     string `json:"netmask"`
 	GatewayAddress string `json:"gateway"`
 
@@ -51,67 +59,68 @@ type Config struct {
 	} `json:"portalstate"`
 }
 
-func (b *Bridge) Config() (config Config, err error) {
+// Config returns the configuration of the bridge
+func (b *Bridge) Config() (Config, error) {
+	config := Config{}
 	if !b.isAvailable() {
-		err = errors.New("Bridge is not yet ready")
-		return
+		return config, ErrBridgeNotAvailable
 	}
 
-	url := b.baseUrl.String() + "api/" + b.Username + "/config"
+	url := b.baseURL.String() + "api/" + b.Username + "/config"
 
 	res, err := http.Get(url)
-
-	err = json.NewDecoder(res.Body).Decode(&config)
-
-	return
-}
-
-func (b *Bridge) SetConfig(args *ConfigArg) (err error) {
-	if !b.isAvailable() {
-		err = errors.New("Bridge is not yet ready")
-		return
-	} else if b.updateInProgress {
-		err = errors.New("Bridge is being updated")
-		return
+	if err != nil {
+		return config, err
 	}
 
-	url := b.baseUrl.String() + "api/" + b.Username + "/config"
+	err = json.NewDecoder(res.Body).Decode(&config)
+	return config, err
+}
 
+// SetConfig applies the specified config options to the bridge.
+func (b *Bridge) SetConfig(args *ConfigArg) error {
+	if !b.isAvailable() {
+		return ErrBridgeNotAvailable
+	} else if b.updateInProgress {
+		return ErrBridgeUpdating
+	}
+
+	url := b.baseURL.String() + "api/" + b.Username + "/config"
 	buf := new(bytes.Buffer)
-	err = json.NewEncoder(buf).Encode(args.args)
 
+	err := json.NewEncoder(buf).Encode(args.args)
 	if err != nil {
-		return
+		return err
 	}
 
 	req, err := http.NewRequest(http.MethodPut, url, buf)
-
 	if err != nil {
-		return
+		return err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{}
 
 	resp, err := client.Do(req)
-
 	if err != nil {
-		return
+		return err
 	}
 
 	var respEntries responseEntries
-
 	err = json.NewDecoder(resp.Body).Decode(&respEntries)
+	if err != nil {
+		return err
+	}
 
 	for _, respEntry := range respEntries {
 		var e responseEntry
 		if err = json.Unmarshal(respEntry, &e); err != nil {
-			return
+			return err
 		}
 
 		if e.Error.Type > 0 {
 			if args.errors == nil {
-				args.errors = make(map[string]responseError)
+				args.errors = make(map[string]ResponseError)
 			}
 
 			keys := strings.Split(e.Error.Address, "/")
@@ -127,7 +136,7 @@ func (b *Bridge) SetConfig(args *ConfigArg) (err error) {
 				if key == "name" {
 					var v string
 					if err = json.Unmarshal(*jsonValue, &v); err != nil {
-						return
+						return err
 					}
 
 					args.args[key] = v
@@ -136,25 +145,25 @@ func (b *Bridge) SetConfig(args *ConfigArg) (err error) {
 		}
 	}
 
-	return
+	return nil
 }
 
-func (b *Bridge) Pair(identifier string) (username string, err error) {
-	url := b.baseUrl.String() + "api"
+// Pair sets up the bridge with a new user.
+func (b *Bridge) Pair(appName string, identifier string) error {
+	url := b.baseURL.String() + "api"
 
 	type reqBody struct {
 		DeviceType string `json:"devicetype"`
 	}
 
-	jsonReq := &reqBody{DeviceType: "hue-go#" + identifier}
+	jsonReq := &reqBody{DeviceType: appName + "#" + identifier}
 
 	buf := new(bytes.Buffer)
 	json.NewEncoder(buf).Encode(jsonReq)
 
 	res, err := http.Post(url, "application/json; charset=utf-8", buf)
-
 	if err != nil {
-		return
+		return err
 	}
 
 	var respBody struct {
@@ -164,24 +173,22 @@ func (b *Bridge) Pair(identifier string) (username string, err error) {
 	}
 
 	err = json.NewDecoder(res.Body).Decode(&respBody)
-
 	if err != nil {
-		return
+		return err
 	}
 
-	username = respBody.successData.username
 	b.Username = respBody.successData.username
 
-	return
+	return nil
 }
 
-func (b *Bridge) CheckForUpdate() (err error) {
+// CheckForUpdate returns whether there is a software update available for the Hue bridge.
+func (b *Bridge) CheckForUpdate() error {
 	if !b.isAvailable() {
-		err = errors.New("Bridge is not yet ready")
-		return
+		return ErrBridgeNotAvailable
 	}
 
-	url := b.baseUrl.String() + "api/" + b.Username + "/config"
+	url := b.baseURL.String() + "api/" + b.Username + "/config"
 
 	var reqBody struct {
 		SwUpdate struct {
@@ -192,53 +199,53 @@ func (b *Bridge) CheckForUpdate() (err error) {
 	reqBody.SwUpdate.CheckForUpdate = true
 
 	buf := new(bytes.Buffer)
-	err = json.NewEncoder(buf).Encode(reqBody)
 
+	err := json.NewEncoder(buf).Encode(reqBody)
 	if err != nil {
-		return
+		return err
 	}
 
 	req, err := http.NewRequest(http.MethodPut, url, buf)
-
 	if err != nil {
-		return
+		return err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{}
 
 	resp, err := client.Do(req)
-
 	if err != nil {
-		return
+		return err
 	}
 
 	var respEntries responseEntries
-
 	err = json.NewDecoder(resp.Body).Decode(&respEntries)
+	if err != nil {
+		return err
+	}
 
 	for _, respEntry := range respEntries {
 		var e responseEntry
 		if err = json.Unmarshal(respEntry, &e); err != nil {
-			return
+			return err
 		}
 
 		if e.Error.Type > 0 {
 			err = errors.New(e.Error.Description)
-			return
+			return err
 		}
 	}
 
-	return
+	return nil
 }
 
-func (b *Bridge) StartUpdate() (err error) {
+// StartUpdate kicks off the update process for the Hue bridge.
+func (b *Bridge) StartUpdate() error {
 	if !b.isAvailable() {
-		err = errors.New("Bridge is not yet ready")
-		return
+		return ErrBridgeNotAvailable
 	}
 
-	url := b.baseUrl.String() + "api/" + b.Username + "/config"
+	url := b.baseURL.String() + "api/" + b.Username + "/config"
 
 	var reqBody struct {
 		SwUpdate struct {
@@ -249,14 +256,12 @@ func (b *Bridge) StartUpdate() (err error) {
 	reqBody.SwUpdate.UpdateState = 3
 
 	buf := new(bytes.Buffer)
-	err = json.NewEncoder(buf).Encode(reqBody)
-
+	err := json.NewEncoder(buf).Encode(reqBody)
 	if err != nil {
 		return err
 	}
 
 	req, err := http.NewRequest(http.MethodPut, url, buf)
-
 	if err != nil {
 		return err
 	}
@@ -265,7 +270,6 @@ func (b *Bridge) StartUpdate() (err error) {
 	client := &http.Client{}
 
 	resp, err := client.Do(req)
-
 	if err != nil {
 		return err
 	}
@@ -273,11 +277,14 @@ func (b *Bridge) StartUpdate() (err error) {
 	var respEntries responseEntries
 
 	err = json.NewDecoder(resp.Body).Decode(&respEntries)
+	if err != nil {
+		return err
+	}
 
 	for _, respEntry := range respEntries {
 		var e responseEntry
 		if err = json.Unmarshal(respEntry, &e); err != nil {
-			return
+			return err
 		}
 
 		if e.Error.Type > 0 {
@@ -288,13 +295,13 @@ func (b *Bridge) StartUpdate() (err error) {
 	return nil
 }
 
-func (b *Bridge) FinishUpdate() (err error) {
+// FinishUpdate completes the update process
+func (b *Bridge) FinishUpdate() error {
 	if !b.isAvailable() {
-		err = errors.New("Bridge is not yet ready")
-		return
+		return ErrBridgeNotAvailable
 	}
 
-	url := b.baseUrl.String() + "api/" + b.Username + "/config"
+	url := b.baseURL.String() + "api/" + b.Username + "/config"
 
 	var reqBody struct {
 		SwUpdate struct {
@@ -305,14 +312,12 @@ func (b *Bridge) FinishUpdate() (err error) {
 	reqBody.SwUpdate.Notify = false
 
 	buf := new(bytes.Buffer)
-	err = json.NewEncoder(buf).Encode(reqBody)
-
+	err := json.NewEncoder(buf).Encode(reqBody)
 	if err != nil {
 		return err
 	}
 
 	req, err := http.NewRequest(http.MethodPut, url, buf)
-
 	if err != nil {
 		return err
 	}
@@ -321,7 +326,6 @@ func (b *Bridge) FinishUpdate() (err error) {
 	client := &http.Client{}
 
 	resp, err := client.Do(req)
-
 	if err != nil {
 		return err
 	}
@@ -329,11 +333,14 @@ func (b *Bridge) FinishUpdate() (err error) {
 	var respEntries responseEntries
 
 	err = json.NewDecoder(resp.Body).Decode(&respEntries)
+	if err != nil {
+		return err
+	}
 
 	for _, respEntry := range respEntries {
 		var e responseEntry
 		if err = json.Unmarshal(respEntry, &e); err != nil {
-			return
+			return err
 		}
 
 		if e.Error.Type > 0 {

@@ -1,14 +1,14 @@
-package hue_go
+package hue
 
 import "encoding/json"
 
 type arg struct {
 	args    map[string]interface{}
-	errors  map[string]responseError
+	errors  map[string]ResponseError
 	success map[string]interface{}
 }
 
-var responseErrorTypes map[int]string = map[int]string{
+var responseErrorTypes = map[int]string{
 	1:   "Unauthorized User",
 	2:   "Body contains invalid JSON",
 	3:   "Resource not available",
@@ -22,9 +22,9 @@ var responseErrorTypes map[int]string = map[int]string{
 	901: "Internal error",
 }
 
-// The error message returned if the given entry is invalid.
+// ResponseError is the error message returned if the given entry is invalid.
 // The address refers to the component which failed to change; the Type maps to errorTypes above.
-type responseError struct {
+type ResponseError struct {
 	Type        int    `json:"type"`
 	Description string `json:"description"`
 	Address     string `json:"address"`
@@ -33,7 +33,7 @@ type responseError struct {
 // One of the entries in the response array returned by the API to a PUT/POST request.
 type responseEntry struct {
 	Success map[string]*json.RawMessage `json:"success"`
-	Error   responseError               `json:"error"`
+	Error   ResponseError               `json:"error"`
 }
 
 // The overall response array returned by the API to a PUT/POST request.

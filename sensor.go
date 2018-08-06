@@ -1,4 +1,4 @@
-package hue_go
+package hue
 
 import (
 	"bytes"
@@ -9,6 +9,7 @@ import (
 	"strings"
 )
 
+// SensorState represents the state of a sensor.
 type SensorState struct {
 	LastUpdated string `json:"lastupdated"`
 
@@ -28,6 +29,7 @@ type SensorState struct {
 	Status int32 `json:"status"`
 }
 
+// SensorConfig represents the configuration of a sensor.
 type SensorConfig struct {
 	On        bool `json:"on"`
 	Reachable bool `json:"reachable"`
@@ -35,7 +37,7 @@ type SensorConfig struct {
 	Battery  uint8    `json:"battery"`
 	Alert    string   `json:"alert"`
 	UserTest bool     `json:"usertest"`
-	Url      *url.URL `json:"url"`
+	URL      *url.URL `json:"url"`
 
 	Pending       []string `json:"pending"`
 	LedIndication bool     `json:"ledindication"`
@@ -51,14 +53,15 @@ type SensorConfig struct {
 	ThresholdOffset uint16 `json:"tholdoffset"`
 }
 
+// Sensor represents a single sensor instance on a Hue bridge.
 type Sensor struct {
-	Id               string
+	ID               string
 	Name             string `json:"name"`
 	Type             string `json:"type"`
-	ModelId          string `json:"modelid"`
+	ModelID          string `json:"modelid"`
 	ManufacturerName string `json:"manufacturername"`
-	ProductId        string `json:"productid"`
-	UniqueId         string `json:"uniqueid"`
+	ProductID        string `json:"productid"`
+	UniqueID         string `json:"uniqueid"`
 	SwVersion        string `json:"swversion"`
 
 	Sensitivity    int32 `json:"sensitivity"`
@@ -69,153 +72,160 @@ type Sensor struct {
 	State SensorState `json:"state"`
 }
 
+// NewSensor represents an instance of a newly configured sensor instance paired to a Hue bridge.
 type NewSensor struct {
-	Id   string
+	ID   string
 	Name string `json:"name"`
 }
 
+// SearchForNewSensors attempts to discover new sensors added to the bridge.
 func (b *Bridge) SearchForNewSensors() error {
-	return errors.New("Search is not yet supported")
+	return errors.New("search is not yet supported")
 }
 
-func (b *Bridge) NewSensors() (sensors []NewSensor, err error) {
+// NewSensors returns the list of newly configured sensors.
+// This will not return anything if SearchForNewSensors has not previously been called.
+func (b *Bridge) NewSensors() ([]NewSensor, error) {
 	if !b.isAvailable() {
-		err = errors.New("Bridge is not yet ready")
-		return
+		return nil, ErrBridgeNotAvailable
 	} else if b.updateInProgress {
-		err = errors.New("Bridge is being updated")
-		return
+		return nil, ErrBridgeUpdating
 	}
 
-	url := b.baseUrl.String() + "api/" + b.Username + "/sensors/new"
+	url := b.baseURL.String() + "api/" + b.Username + "/sensors/new"
 
 	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
 
 	var respEntries map[string]*json.RawMessage
-
 	err = json.NewDecoder(resp.Body).Decode(&respEntries)
+	if err != nil {
+		return nil, err
+	}
 
+	var sensors []NewSensor
 	for key, respEntry := range respEntries {
 		if key == "lastscan" {
 			var time string
 			if err = json.Unmarshal(*respEntry, &time); err != nil {
-				return
+				return nil, err
 			}
 
 			// TODO: do something with this value?
 		} else {
 			var s NewSensor
 			if err = json.Unmarshal(*respEntry, &s); err != nil {
-				return
+				return nil, err
 			}
 
-			s.Id = key
+			s.ID = key
 
 			sensors = append(sensors, s)
 		}
 	}
 
-	return
+	return sensors, nil
 }
 
-func (b *Bridge) Sensors() (sensors []Sensor, err error) {
+// Sensors returns the list of sensors available on the bridge.
+func (b *Bridge) Sensors() ([]Sensor, error) {
 	if !b.isAvailable() {
-		err = errors.New("Bridge is not yet ready")
-		return
+		return nil, ErrBridgeNotAvailable
 	} else if b.updateInProgress {
-		err = errors.New("Bridge is being updated")
-		return
+		return nil, ErrBridgeUpdating
 	}
 
-	url := b.baseUrl.String() + "api/" + b.Username + "/sensors"
+	url := b.baseURL.String() + "api/" + b.Username + "/sensors"
 
 	res, err := http.Get(url)
-
-	var respBody map[string]Sensor
-
-	err = json.NewDecoder(res.Body).Decode(&respBody)
-
 	if err != nil {
-		return
+		return nil, err
 	}
 
+	var respBody map[string]Sensor
+	err = json.NewDecoder(res.Body).Decode(&respBody)
+	if err != nil {
+		return nil, err
+	}
+
+	var sensors []Sensor
 	for id, sensor := range respBody {
-		sensor.Id = id
+		sensor.ID = id
 
 		sensors = append(sensors, sensor)
 	}
 
-	return
+	return sensors, nil
 }
 
-func (b *Bridge) Sensor(id string) (sensor Sensor, err error) {
+// Sensor returns the specified sensor.
+func (b *Bridge) Sensor(id string) (Sensor, error) {
+	var sensor Sensor
+
 	if !b.isAvailable() {
-		err = errors.New("Bridge is not yet ready")
-		return
+		return sensor, ErrBridgeNotAvailable
 	} else if b.updateInProgress {
-		err = errors.New("Bridge is being updated")
-		return
+		return sensor, ErrBridgeUpdating
 	}
 
-	url := b.baseUrl.String() + "api/" + b.Username + "/sensors/" + id
+	url := b.baseURL.String() + "api/" + b.Username + "/sensors/" + id
 
 	resp, err := http.Get(url)
+	if err != nil {
+		return sensor, err
+	}
 
 	err = json.NewDecoder(resp.Body).Decode(&sensor)
-
-	if err != nil {
-		return
-	}
-
-	return
+	return sensor, err
 }
 
-func (b *Bridge) SetSensor(id string, args *SensorArg) (err error) {
+// SetSensor updates the configuration of the specified sensor.
+func (b *Bridge) SetSensor(id string, args *SensorArg) error {
 	if !b.isAvailable() {
-		err = errors.New("Bridge is not yet ready")
-		return
+		return ErrBridgeNotAvailable
 	} else if b.updateInProgress {
-		err = errors.New("Bridge is being updated")
-		return
+		return ErrBridgeUpdating
 	}
 
-	url := b.baseUrl.String() + "api/" + b.Username + "/sensors/" + id
+	url := b.baseURL.String() + "api/" + b.Username + "/sensors/" + id
 
 	buf := new(bytes.Buffer)
-	err = json.NewEncoder(buf).Encode(args.args)
-
+	err := json.NewEncoder(buf).Encode(args.args)
 	if err != nil {
-		return
+		return err
 	}
 
 	req, err := http.NewRequest(http.MethodPut, url, buf)
-
 	if err != nil {
-		return
+		return err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{}
 
 	resp, err := client.Do(req)
-
 	if err != nil {
-		return
+		return err
 	}
 
 	var respEntries responseEntries
 
 	err = json.NewDecoder(resp.Body).Decode(&respEntries)
+	if err != nil {
+		return err
+	}
 
 	for _, respEntry := range respEntries {
 		var e responseEntry
 		if err = json.Unmarshal(respEntry, &e); err != nil {
-			return
+			return err
 		}
 
 		if e.Error.Type > 0 {
 			if args.errors == nil {
-				args.errors = make(map[string]responseError)
+				args.errors = make(map[string]ResponseError)
 			}
 
 			keys := strings.Split(e.Error.Address, "/")
@@ -231,7 +241,7 @@ func (b *Bridge) SetSensor(id string, args *SensorArg) (err error) {
 				if key == "name" {
 					var v string
 					if err = json.Unmarshal(*jsonValue, &v); err != nil {
-						return
+						return err
 					}
 
 					args.args[key] = v
@@ -240,55 +250,53 @@ func (b *Bridge) SetSensor(id string, args *SensorArg) (err error) {
 		}
 	}
 
-	return
+	return nil
 }
 
-func (b *Bridge) SetSensorConfig(id string, args *SensorConfigArg) (err error) {
+// SetSensorConfig updates the configuration a sensor.
+func (b *Bridge) SetSensorConfig(id string, args *SensorConfigArg) error {
 	if !b.isAvailable() {
-		err = errors.New("Bridge is not yet ready")
-		return
+		return ErrBridgeNotAvailable
 	} else if b.updateInProgress {
-		err = errors.New("Bridge is being updated")
-		return
+		return ErrBridgeUpdating
 	}
 
-	url := b.baseUrl.String() + "api/" + b.Username + "/sensors/" + id + "/config"
+	url := b.baseURL.String() + "api/" + b.Username + "/sensors/" + id + "/config"
 
 	buf := new(bytes.Buffer)
-	err = json.NewEncoder(buf).Encode(args.args)
-
+	err := json.NewEncoder(buf).Encode(args.args)
 	if err != nil {
-		return
+		return err
 	}
 
 	req, err := http.NewRequest(http.MethodPut, url, buf)
-
 	if err != nil {
-		return
+		return err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{}
 
 	resp, err := client.Do(req)
-
 	if err != nil {
-		return
+		return err
 	}
 
 	var respEntries responseEntries
-
 	err = json.NewDecoder(resp.Body).Decode(&respEntries)
+	if err != nil {
+		return err
+	}
 
 	for _, respEntry := range respEntries {
 		var e responseEntry
 		if err = json.Unmarshal(respEntry, &e); err != nil {
-			return
+			return err
 		}
 
 		if e.Error.Type > 0 {
 			if args.errors == nil {
-				args.errors = make(map[string]responseError)
+				args.errors = make(map[string]ResponseError)
 			}
 
 			keys := strings.Split(e.Error.Address, "/")
@@ -304,35 +312,35 @@ func (b *Bridge) SetSensorConfig(id string, args *SensorConfigArg) (err error) {
 				if key == "alert" || key == "url" || key == "lat" || key == "long" {
 					var v string
 					if err = json.Unmarshal(*jsonValue, &v); err != nil {
-						return
+						return err
 					}
 
 					args.args[key] = v
 				} else if key == "on" || key == "reachable" {
 					var v bool
 					if err = json.Unmarshal(*jsonValue, &v); err != nil {
-						return
+						return err
 					}
 
 					args.args[key] = v
 				} else if key == "battery" {
 					var v uint8
 					if err = json.Unmarshal(*jsonValue, &v); err != nil {
-						return
+						return err
 					}
 
 					args.args[key] = v
 				} else if key == "sunriseoffset" || key == "sunsetoffset" {
 					var v int8
 					if err = json.Unmarshal(*jsonValue, &v); err != nil {
-						return
+						return err
 					}
 
 					args.args[key] = v
 				} else if key == "tholddark" || key == "tholdoffset" {
 					var v uint16
 					if err = json.Unmarshal(*jsonValue, &v); err != nil {
-						return
+						return err
 					}
 
 					args.args[key] = v
@@ -341,55 +349,54 @@ func (b *Bridge) SetSensorConfig(id string, args *SensorConfigArg) (err error) {
 		}
 	}
 
-	return
+	return nil
 }
 
-func (b *Bridge) SetSensorState(id string, args *SensorStateArg) (err error) {
+// SetSensorState updates the state of the specified sensor.
+func (b *Bridge) SetSensorState(id string, args *SensorStateArg) error {
 	if !b.isAvailable() {
-		err = errors.New("Bridge is not yet ready")
-		return
+		return ErrBridgeNotAvailable
 	} else if b.updateInProgress {
-		err = errors.New("Bridge is being updated")
-		return
+		return ErrBridgeUpdating
 	}
 
-	url := b.baseUrl.String() + "api/" + b.Username + "/sensors/" + id + "/state"
+	url := b.baseURL.String() + "api/" + b.Username + "/sensors/" + id + "/state"
 
 	buf := new(bytes.Buffer)
-	err = json.NewEncoder(buf).Encode(args.args)
-
+	err := json.NewEncoder(buf).Encode(args.args)
 	if err != nil {
-		return
+		return err
 	}
 
 	req, err := http.NewRequest(http.MethodPut, url, buf)
-
 	if err != nil {
-		return
+		return err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{}
 
 	resp, err := client.Do(req)
-
 	if err != nil {
-		return
+		return err
 	}
 
 	var respEntries responseEntries
 
 	err = json.NewDecoder(resp.Body).Decode(&respEntries)
+	if err != nil {
+		return err
+	}
 
 	for _, respEntry := range respEntries {
 		var e responseEntry
 		if err = json.Unmarshal(respEntry, &e); err != nil {
-			return
+			return err
 		}
 
 		if e.Error.Type > 0 {
 			if args.errors == nil {
-				args.errors = make(map[string]responseError)
+				args.errors = make(map[string]ResponseError)
 			}
 
 			keys := strings.Split(e.Error.Address, "/")
@@ -405,21 +412,21 @@ func (b *Bridge) SetSensorState(id string, args *SensorStateArg) (err error) {
 				if key == "open" || key == "presence" || key == "flag" {
 					var v bool
 					if err = json.Unmarshal(*jsonValue, &v); err != nil {
-						return
+						return err
 					}
 
 					args.args[key] = v
 				} else if key == "temperature" || key == "humidity" || key == "status" {
 					var v int32
 					if err = json.Unmarshal(*jsonValue, &v); err != nil {
-						return
+						return err
 					}
 
 					args.args[key] = v
 				} else if key == "lightlevel" {
 					var v uint16
 					if err = json.Unmarshal(*jsonValue, &v); err != nil {
-						return
+						return err
 					}
 
 					args.args[key] = v
@@ -428,75 +435,74 @@ func (b *Bridge) SetSensorState(id string, args *SensorStateArg) (err error) {
 		}
 	}
 
-	return
+	return nil
 }
 
-func (b *Bridge) CreateSensor(sensor *Sensor) (err error) {
+// CreateSensor adds a new sensor to the bridge.
+func (b *Bridge) CreateSensor(sensor *Sensor) error {
 	if !b.isAvailable() {
-		err = errors.New("Bridge is not yet ready")
-		return
+		return ErrBridgeNotAvailable
 	} else if b.updateInProgress {
-		err = errors.New("Bridge is being updated")
-		return
+		return ErrBridgeUpdating
 	}
 
-	url := b.baseUrl.String() + "api/" + b.Username + "/sensors"
+	url := b.baseURL.String() + "api/" + b.Username + "/sensors"
 
 	buf := new(bytes.Buffer)
-	err = json.NewEncoder(buf).Encode(sensor)
-
+	err := json.NewEncoder(buf).Encode(sensor)
 	if err != nil {
-		return
+		return err
 	}
 
 	req, err := http.NewRequest(http.MethodPost, url, buf)
-
 	if err != nil {
-		return
+		return err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{}
 
 	resp, err := client.Do(req)
-
 	if err != nil {
-		return
+		return err
 	}
 
 	var respEntries responseEntries
-
 	err = json.NewDecoder(resp.Body).Decode(&respEntries)
+	if err != nil {
+		return err
+	}
 
 	for _, respEntry := range respEntries {
 		var e responseEntry
 		if err = json.Unmarshal(respEntry, &e); err != nil {
-			return
+			return err
 		}
 
 		if e.Error.Type > 0 {
 			return errors.New(e.Error.Description)
-		} else {
-			for path, jsonValue := range e.Success {
-				keys := strings.Split(path, "/")
+		}
 
-				key := keys[len(keys)-1]
+		for path, jsonValue := range e.Success {
+			keys := strings.Split(path, "/")
 
-				if key == "id" {
-					var v string
-					if err = json.Unmarshal(*jsonValue, &v); err != nil {
-						return
-					}
+			key := keys[len(keys)-1]
 
-					sensor.Id = v
+			if key == "id" {
+				var v string
+				if err = json.Unmarshal(*jsonValue, &v); err != nil {
+					return err
 				}
+
+				sensor.ID = v
 			}
 		}
 	}
 
-	return
+	return nil
 }
 
+// DeleteSensor removes the specified sensor from the bridge.
 func (b *Bridge) DeleteSensor(id string) error {
-	return errors.New("Delete is not yet supported")
+	return errors.New("delete is not yet supported")
 }

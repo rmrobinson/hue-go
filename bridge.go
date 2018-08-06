@@ -1,4 +1,4 @@
-package hue_go
+package hue
 
 import (
 	"encoding/xml"
@@ -6,6 +6,15 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+)
+
+var (
+	// ErrBridgeNotConfigured is returned if the bridge URL configured is not valid
+	ErrBridgeNotConfigured = errors.New("bridge is not configured")
+	// ErrInvalidManufacturer is returned if the retrieved bridge manufacturer is invalid
+	ErrInvalidManufacturer = errors.New("invalid manufacturer detected")
+	// ErrInvalidModel is returned if the retrieved bridge model is invalid
+	ErrInvalidModel = errors.New("invalid model detected")
 )
 
 // Icon contains the details of an icon hosted on the bridge.
@@ -22,20 +31,20 @@ type Device struct {
 	DeviceType       string `xml:"deviceType"`
 	FriendlyName     string `xml:"friendlyName"`
 	Manufacturer     string `xml:"manufacturer"`
-	ManufacturerUrl  string `xml:"manufacturerURL"`
+	ManufacturerURL  string `xml:"manufacturerURL"`
 	ModelDescription string `xml:"modelDescription"`
 	ModelName        string `xml:"modelName"`
 	ModelNumber      string `xml:"modelNumber"`
-	ModelUrl         string `xml:"modelURL"`
+	ModelURL         string `xml:"modelURL"`
 	SerialNumber     string `xml:"serialNumber"`
 	UDN              string `xml:"UDN"`
-	PresentationUrl  string `xml:"presentationURL"`
+	PresentationURL  string `xml:"presentationURL"`
 	Icons            []Icon `xml:"iconList>icon"`
 }
 
 // BridgeDescription contains the device information and the URL base which all subsequent calls should be made against.
 type BridgeDescription struct {
-	UrlBase string `xml:"URLBase"`
+	URLBase string `xml:"URLBase"`
 	Device  Device `xml:"device"`
 }
 
@@ -47,65 +56,85 @@ type Bridge struct {
 	// An empty username implies we have not yet paired with the bridge.
 	Username string
 
-	baseUrl *url.URL
+	baseURL *url.URL
 
-	validateUrl *url.URL
+	validateURL *url.URL
 
-	iconUrl *url.URL
+	iconURL *url.URL
 
 	updateInProgress bool
 }
 
-func (b *Bridge) Init(validateUrl *url.URL) (err error) {
-	b.validateUrl = validateUrl
+// NewBridge creates a new instance of a Hue bridge.
+func NewBridge(username string) *Bridge {
+	return &Bridge{
+		Username: username,
+	}
+}
+
+// InitURL initializes this bridge instance with the specified discovery URL.
+func (b *Bridge) InitURL(validateURL *url.URL) error {
+	b.validateURL = validateURL
 
 	desc, err := b.Description()
-
 	if err != nil {
-		return
+		return err
 	}
 
 	b.id = desc.Device.SerialNumber
-	b.baseUrl, err = url.Parse(desc.UrlBase)
+	b.baseURL, err = url.Parse(desc.URLBase)
 
-	return
+	return err
 }
 
-// Parse the validation XML file present on every Hue bridge.
-// See http://www.developers.meethue.com/documentation/hue-bridge-discovery for details of the response format.
-func (b *Bridge) Description() (desc BridgeDescription, err error) {
-	if b.validateUrl == nil {
-		err = errors.New("Bridge is not configured")
-		return
+// InitIP initializes this bridge instance with the specified IP address.
+func (b *Bridge) InitIP(bridgeIP string) error {
+	bridgeURL, err := bridgeDescURLFromIP(bridgeIP)
+	if err != nil {
+		return err
 	}
 
-	res, err := http.Get(b.validateUrl.String())
+	return b.InitURL(bridgeURL)
+}
 
+// Description parses the validation XML file present on every Hue bridge.
+// See http://www.developers.meethue.com/documentation/hue-bridge-discovery for details of the response format.
+func (b *Bridge) Description() (BridgeDescription, error) {
+	desc := BridgeDescription{}
+
+	if b.validateURL == nil {
+		return desc, ErrBridgeNotConfigured
+	}
+
+	res, err := http.Get(b.validateURL.String())
 	if err != nil {
-		return
+		return desc, err
 	}
 
 	err = xml.NewDecoder(res.Body).Decode(&desc)
-
-	if desc.Device.Manufacturer != "Royal Philips Electronics" {
-		err = errors.New("Invalid manufacturer detected")
-		return
-	} else if !strings.Contains(desc.Device.ModelName, "hue bridge") {
-		err = errors.New("Invalid model name detected")
-		return
+	if err != nil {
+		return desc, err
 	}
 
-	return
+	if desc.Device.Manufacturer != "Royal Philips Electronics" {
+		return desc, ErrInvalidManufacturer
+	} else if !strings.Contains(desc.Device.ModelName, "hue bridge") {
+		return desc, ErrInvalidModel
+	}
+
+	return desc, nil
 }
 
 func (b *Bridge) isAvailable() bool {
-	return len(b.Username) > 0 && len(b.baseUrl.Host) > 0
+	return len(b.Username) > 0 && len(b.baseURL.Host) > 0
 }
 
-func (b *Bridge) Id() string {
+// ID returns the unique ID of the bridge
+func (b *Bridge) ID() string {
 	return b.id
 }
 
+// IsUpdating returns whether a bridge is in the process of updating or not.
 func (b *Bridge) IsUpdating() bool {
 	return b.updateInProgress
 }

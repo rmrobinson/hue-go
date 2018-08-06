@@ -3,8 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"net/url"
-
 	"github.com/rmrobinson/hue-go"
 )
 
@@ -16,25 +14,14 @@ var (
 func main() {
 	flag.Parse()
 
-	bridgeUrl, err := url.Parse("http://" + *bridgeAddr + "/description.xml")
-
-	if err != nil {
-		fmt.Printf("Unable to parse supplied bridge address: %s\n", err.Error())
-		return
-	}
-
-	var b hue_go.Bridge
-
-	err = b.Init(bridgeUrl)
-
+	b := hue.NewBridge(*username)
+	err := b.InitIP(*bridgeAddr)
 	if err != nil {
 		fmt.Printf("Unable to initialize supplied bridge address: %s\n", err.Error())
 		return
 	}
 
-	b.Username = *username
-
-	u := hue_go.NewUpdater(&b)
+	u := hue.NewUpdater(b)
 
 	results := make(chan string)
 	quit := make(chan interface{})

@@ -1,4 +1,4 @@
-package hue_go
+package hue
 
 import (
 	"testing"

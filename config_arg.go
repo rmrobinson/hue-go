@@ -1,15 +1,19 @@
-package hue_go
+package hue
 
+// ConfigArg represents a config property that can be set.
 type ConfigArg arg
 
+// Reset clears this configuration.
 func (c *ConfigArg) Reset() {
 	c.args = make(map[string]interface{})
 }
 
-func (c *ConfigArg) Errors() map[string]responseError {
+// Errors exposes any errors encountered when applying the configuration.
+func (c *ConfigArg) Errors() map[string]ResponseError {
 	return c.errors
 }
 
+// SetProxyPort saves the specified value to be applied.
 func (c *ConfigArg) SetProxyPort(port uint16) {
 	if c.args == nil {
 		c.args = make(map[string]interface{})
@@ -18,14 +22,15 @@ func (c *ConfigArg) SetProxyPort(port uint16) {
 	c.args["proxyport"] = port
 }
 
+// ProxyPort returns the proxy port option, if configured.
 func (c *ConfigArg) ProxyPort() uint16 {
 	if ret, ok := c.args["proxyport"].(uint16); ok {
 		return ret
-	} else {
-		return 0
 	}
+	return 0
 }
 
+// SetProxyAddress saves the specified value to be applied.
 func (c *ConfigArg) SetProxyAddress(address string) {
 	if c.args == nil {
 		c.args = make(map[string]interface{})
@@ -38,14 +43,15 @@ func (c *ConfigArg) SetProxyAddress(address string) {
 	}
 }
 
+// ProxyAddress returns the proxy address option, if configured.
 func (c *ConfigArg) ProxyAddress() string {
 	if ret, ok := c.args["proxyaddress"].(string); ok {
 		return ret
-	} else {
-		return ""
 	}
+	return ""
 }
 
+// SetName saves the specified value to be applied.
 func (c *ConfigArg) SetName(name string) {
 	if c.args == nil {
 		c.args = make(map[string]interface{})
@@ -54,15 +60,16 @@ func (c *ConfigArg) SetName(name string) {
 	c.args["name"] = name
 }
 
+// Name returns the name option, if configured.
 func (c *ConfigArg) Name() string {
 	if ret, ok := c.args["name"].(string); ok {
 		return ret
-	} else {
-		return ""
 	}
+	return ""
 }
 
-func (c *ConfigArg) SetDhcp() {
+// SetDHCP saves the specified value to be applied.
+func (c *ConfigArg) SetDHCP() {
 	if c.args == nil {
 		c.args = make(map[string]interface{})
 	}
@@ -70,14 +77,15 @@ func (c *ConfigArg) SetDhcp() {
 	c.args["dhcp"] = true
 }
 
-func (c *ConfigArg) Dhcp() bool {
+// DHCP returns the DHCP option, if configured.
+func (c *ConfigArg) DHCP() bool {
 	if ret, ok := c.args["dhcp"].(bool); ok {
 		return ret
-	} else {
-		return false
 	}
+	return false
 }
 
+// SetStaticAddress saves the specified value to be applied.
 func (c *ConfigArg) SetStaticAddress(addr string, netmask string, gateway string) {
 	if c.args == nil {
 		c.args = make(map[string]interface{})
@@ -89,6 +97,7 @@ func (c *ConfigArg) SetStaticAddress(addr string, netmask string, gateway string
 	c.args["dhcp"] = false
 }
 
+// StaticAddress returns the static address option, if configured.
 func (c *ConfigArg) StaticAddress() (string, string, string) {
 	var addr, netmask, gateway string
 	var ok bool
@@ -114,6 +123,7 @@ func (c *ConfigArg) StaticAddress() (string, string, string) {
 	return addr, netmask, gateway
 }
 
+// SetTouchLink saves the specified value to be applied.
 func (c *ConfigArg) SetTouchLink() {
 	if c.args == nil {
 		c.args = make(map[string]interface{})
