@@ -6,21 +6,20 @@ import (
 )
 
 func main() {
-	l := hue_go.NewLocator()
-
-	results := make(chan hue_go.Bridge)
+	l := hue.NewLocator()
+	results := make(chan hue.Bridge)
 
 	go l.Run(results)
 
 	for {
 		b := <-results
 
-		fmt.Printf("Bridge %s detected\n", b.Id())
+		fmt.Printf("Bridge %s detected\n", b.ID())
 
 		desc, err := b.Description()
 
 		if err != nil {
-			fmt.Printf("Unable to get description for bridge %s: %s\n", b.Id(), err.Error())
+			fmt.Printf("Unable to get description for bridge %s: %s\n", b.ID(), err.Error())
 		} else {
 			fmt.Printf("Bridge desc: %+v\n", desc)
 		}

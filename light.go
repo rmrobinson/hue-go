@@ -1,4 +1,4 @@
-package hue_go
+package hue
 
 import (
 	"bytes"
@@ -8,6 +8,7 @@ import (
 	"strings"
 )
 
+// LightState represents the state of a single light.
 type LightState struct {
 	On               bool       `json:"on"`
 	Brightness       uint8      `json:"bri"`
@@ -22,94 +23,106 @@ type LightState struct {
 	Reachable        bool   `json:"reachable"`
 }
 
+// Light represents a single light device.
 type Light struct {
-	Id               string
+	ID               string
 	Name             string `json:"name"`
 	Model            string `json:"type"`
-	ModelId          string `json:"modelid"`
+	ModelID          string `json:"modelid"`
 	ManufacturerName string `json:"manufacturername"`
-	UniqueId         string `json:"uniqueid"`
+	UniqueID         string `json:"uniqueid"`
 	SwVersion        string `json:"swversion"`
 
 	State LightState `json:"state"`
 }
 
+// NewLight represents a single, un-configured light.
 type NewLight struct {
-	Id   string
+	ID   string
 	Name string `json:"name"`
 }
 
+// SearchForNewLights begins the process of locating new lights on the bridge.
 func (b *Bridge) SearchForNewLights() error {
-	return errors.New("Search is not yet supported")
+	return errors.New("search is not yet supported")
 }
 
-func (b *Bridge) NewLights() (lights []NewLight, err error) {
+// NewLights returns the collection of newly discovered lights.
+// Only returns a value if SearchForNewLights has previously been called.
+func (b *Bridge) NewLights() ([]NewLight, error) {
 	if !b.isAvailable() {
-		err = errors.New("Bridge is not yet ready")
-		return
+		return nil, ErrBridgeNotAvailable
 	} else if b.updateInProgress {
-		err = errors.New("Bridge is being updated")
-		return
+		return nil, ErrBridgeUpdating
 	}
 
-	url := b.baseUrl.String() + "api/" + b.Username + "/lights/new"
+	url := b.baseURL.String() + "api/" + b.Username + "/lights/new"
 
 	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
 
 	var respEntries map[string]*json.RawMessage
 
 	err = json.NewDecoder(resp.Body).Decode(&respEntries)
+	if err != nil {
+		return nil, err
+	}
 
+	var lights []NewLight
 	for key, respEntry := range respEntries {
 		if key == "lastscan" {
 			var time string
 			if err = json.Unmarshal(*respEntry, &time); err != nil {
-				return
+				return nil, err
 			}
 
 			// TODO: do something with this value?
 		} else {
 			var l NewLight
 			if err = json.Unmarshal(*respEntry, &l); err != nil {
-				return
+				return nil, err
 			}
 
-			l.Id = key
+			l.ID = key
 
 			lights = append(lights, l)
 		}
 	}
 
-	return
+	return lights, nil
 }
 
-func (b *Bridge) Lights() (lights []Light, err error) {
+// Lights returns the collection of lights configured on the bridge.
+func (b *Bridge) Lights() ([]Light, error) {
 	if !b.isAvailable() {
-		err = errors.New("Bridge is not yet ready")
-		return
+		return nil, ErrBridgeNotAvailable
 	} else if b.updateInProgress {
-		err = errors.New("Bridge is being updated")
-		return
+		return nil, ErrBridgeUpdating
 	}
 
-	url := b.baseUrl.String() + "api/" + b.Username + "/lights"
+	url := b.baseURL.String() + "api/" + b.Username + "/lights"
 
 	res, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
 
 	var respBody map[string]Light
 
 	err = json.NewDecoder(res.Body).Decode(&respBody)
-
 	if err != nil {
-		return
+		return nil, err
 	}
 
+	var lights []Light
 	for id, light := range respBody {
-		light.Id = id
+		light.ID = id
 
 		if light.State.ColorMode == "xy" {
 			xy := XY{X: light.State.XY[0], Y: light.State.XY[1]}
-			light.State.RGB.FromXY(xy, light.ModelId)
+			light.State.RGB.FromXY(xy, light.ModelID)
 		} else if light.State.ColorMode == "ct" {
 			light.State.RGB.FromCT(light.State.ColorTemperature)
 		} else if light.State.ColorMode == "hs" {
@@ -120,31 +133,33 @@ func (b *Bridge) Lights() (lights []Light, err error) {
 		lights = append(lights, light)
 	}
 
-	return
+	return lights, err
 }
 
-func (b *Bridge) Light(id string) (light Light, err error) {
+// Light returns a single light from the bridge.
+func (b *Bridge) Light(id string) (Light, error) {
 	if !b.isAvailable() {
-		err = errors.New("Bridge is not yet ready")
-		return
+		return Light{}, ErrBridgeNotAvailable
 	} else if b.updateInProgress {
-		err = errors.New("Bridge is being updated")
-		return
+		return Light{}, ErrBridgeUpdating
 	}
 
-	url := b.baseUrl.String() + "api/" + b.Username + "/lights/" + id
+	url := b.baseURL.String() + "api/" + b.Username + "/lights/" + id
 
 	resp, err := http.Get(url)
-
-	err = json.NewDecoder(resp.Body).Decode(&light)
-
 	if err != nil {
-		return
+		return Light{}, err
+	}
+
+	var light Light
+	err = json.NewDecoder(resp.Body).Decode(&light)
+	if err != nil {
+		return light, err
 	}
 
 	if light.State.ColorMode == "xy" {
 		xy := XY{X: light.State.XY[0], Y: light.State.XY[1]}
-		light.State.RGB.FromXY(xy, light.ModelId)
+		light.State.RGB.FromXY(xy, light.ModelID)
 	} else if light.State.ColorMode == "ct" {
 		light.State.RGB.FromCT(light.State.ColorTemperature)
 	} else if light.State.ColorMode == "hs" {
@@ -152,55 +167,54 @@ func (b *Bridge) Light(id string) (light Light, err error) {
 		light.State.RGB.FromHSB(hsb)
 	}
 
-	return
+	return light, nil
 }
 
-func (b *Bridge) SetLight(id string, args *LightArg) (err error) {
+// SetLight updates the specified light with the configuration supplied.
+func (b *Bridge) SetLight(id string, args *LightArg) error {
 	if !b.isAvailable() {
-		err = errors.New("Bridge is not yet ready")
-		return
+		return ErrBridgeNotAvailable
 	} else if b.updateInProgress {
-		err = errors.New("Bridge is being updated")
-		return
+		return ErrBridgeUpdating
 	}
 
-	url := b.baseUrl.String() + "api/" + b.Username + "/lights/" + id
+	url := b.baseURL.String() + "api/" + b.Username + "/lights/" + id
 
 	buf := new(bytes.Buffer)
-	err = json.NewEncoder(buf).Encode(args.args)
 
+	err := json.NewEncoder(buf).Encode(args.args)
 	if err != nil {
-		return
+		return err
 	}
 
 	req, err := http.NewRequest(http.MethodPut, url, buf)
-
 	if err != nil {
-		return
+		return err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{}
 
 	resp, err := client.Do(req)
-
 	if err != nil {
-		return
+		return err
 	}
 
 	var respEntries responseEntries
-
 	err = json.NewDecoder(resp.Body).Decode(&respEntries)
+	if err != nil {
+		return err
+	}
 
 	for _, respEntry := range respEntries {
 		var e responseEntry
 		if err = json.Unmarshal(respEntry, &e); err != nil {
-			return
+			return err
 		}
 
 		if e.Error.Type > 0 {
 			if args.errors == nil {
-				args.errors = make(map[string]responseError)
+				args.errors = make(map[string]ResponseError)
 			}
 
 			keys := strings.Split(e.Error.Address, "/")
@@ -216,7 +230,7 @@ func (b *Bridge) SetLight(id string, args *LightArg) (err error) {
 				if key == "name" {
 					var v string
 					if err = json.Unmarshal(*jsonValue, &v); err != nil {
-						return
+						return err
 					}
 
 					args.args[key] = v
@@ -225,55 +239,51 @@ func (b *Bridge) SetLight(id string, args *LightArg) (err error) {
 		}
 	}
 
-	return
+	return nil
 }
 
-func (b *Bridge) SetLightState(id string, args *LightStateArg) (err error) {
+// SetLightState sets the specified light with the supplied light state.
+func (b *Bridge) SetLightState(id string, args *LightStateArg) error {
 	if !b.isAvailable() {
-		err = errors.New("Bridge is not yet ready")
-		return
+		return ErrBridgeNotAvailable
 	} else if b.updateInProgress {
-		err = errors.New("Bridge is being updated")
-		return
+		return ErrBridgeUpdating
 	}
 
-	url := b.baseUrl.String() + "api/" + b.Username + "/lights/" + id + "/state"
+	url := b.baseURL.String() + "api/" + b.Username + "/lights/" + id + "/state"
 
 	buf := new(bytes.Buffer)
-	err = json.NewEncoder(buf).Encode(args.args)
 
+	err := json.NewEncoder(buf).Encode(args.args)
 	if err != nil {
-		return
+		return err
 	}
 
 	req, err := http.NewRequest(http.MethodPut, url, buf)
-
 	if err != nil {
-		return
+		return err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{}
 
 	resp, err := client.Do(req)
-
 	if err != nil {
-		return
+		return err
 	}
 
 	var respEntries responseEntries
-
 	err = json.NewDecoder(resp.Body).Decode(&respEntries)
 
 	for _, respEntry := range respEntries {
 		var e responseEntry
 		if err = json.Unmarshal(respEntry, &e); err != nil {
-			return
+			return err
 		}
 
 		if e.Error.Type > 0 {
 			if args.errors == nil {
-				args.errors = make(map[string]responseError)
+				args.errors = make(map[string]ResponseError)
 			}
 
 			keys := strings.Split(e.Error.Address, "/")
@@ -289,28 +299,28 @@ func (b *Bridge) SetLightState(id string, args *LightStateArg) (err error) {
 				if key == "xy" {
 					var xyArr []float64
 					if err = json.Unmarshal(*jsonValue, &xyArr); err != nil {
-						return
+						return err
 					}
 
 					args.args[key] = xyArr
 				} else if key == "bri" || key == "hue" || key == "sat" || key == "ct" || key == "transitiontime" {
 					var v int
 					if err = json.Unmarshal(*jsonValue, &v); err != nil {
-						return
+						return err
 					}
 
 					args.args[key] = v
 				} else if key == "on" {
 					var v bool
 					if err = json.Unmarshal(*jsonValue, &v); err != nil {
-						return
+						return err
 					}
 
 					args.args[key] = v
 				} else if key == "alert" || key == "effect" {
 					var v string
 					if err = json.Unmarshal(*jsonValue, &v); err != nil {
-						return
+						return err
 					}
 
 					args.args[key] = v
@@ -319,9 +329,10 @@ func (b *Bridge) SetLightState(id string, args *LightStateArg) (err error) {
 		}
 	}
 
-	return
+	return nil
 }
 
+// DeleteLight removes the specified light from the bridge.
 func (b *Bridge) DeleteLight(id string) error {
-	return errors.New("Delete is not yet supported")
+	return errors.New("delete is not yet supported")
 }

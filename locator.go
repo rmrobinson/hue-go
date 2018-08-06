@@ -1,4 +1,4 @@
-package hue_go
+package hue
 
 import (
 	"encoding/json"
@@ -13,9 +13,12 @@ import (
 )
 
 const (
-	SOURCE_STATIC = iota
-	SOURCE_UPNP
-	SOURCE_NUPNP
+	// SourceStatic means this location came via a static configuration
+	SourceStatic   = iota
+	// SourceUPNP means this location came via a UPNP discovery mechanism.
+	SourceUPNP
+	// SourceNUPNP means this location came via a nUPNP discovery mechanism.
+	SourceNUPNP
 )
 
 type result struct {
@@ -23,6 +26,7 @@ type result struct {
 	source int
 }
 
+// Locator is an instance of the Hue auto-discovery runner.
 type Locator struct {
 	staticAddrs []string
 
@@ -32,6 +36,7 @@ type Locator struct {
 	incoming chan result
 }
 
+// NewLocator creates a new instance of the locator.
 func NewLocator() *Locator {
 	d := &Locator{
 		incoming:    make(chan result),
@@ -42,10 +47,12 @@ func NewLocator() *Locator {
 	return d
 }
 
+// AddStaticAddress inserts a static Hue address into the location detection algorithm.
 func (d *Locator) AddStaticAddress(addr string) {
 	d.staticAddrs = append(d.staticAddrs, addr)
 }
 
+// Run begins running an instance of the Hue locator. Detected bridges will be passed along the supplied channel.
 func (d *Locator) Run(results chan Bridge) {
 	go runStatic(d.staticAddrs, d.incoming)
 	go runUPnP(d.incoming)
@@ -58,34 +65,37 @@ func (d *Locator) Run(results chan Bridge) {
 			continue
 		}
 
-		br := Bridge{}
-		err := br.Init(res.url)
-
+		br := NewBridge("")
+		err := br.InitURL(res.url)
 		if err != nil {
 			log.Fatalf("Unable to validate bridge URL %s: %s\n", res.url.String(), err)
 			continue
 		}
 
-		currUrl, ok := d.profiles[br.Id()]
+		currURL, ok := d.profiles[br.ID()]
 
 		// If the ID isn't present, we haven't seen this bridge before
 		if !ok {
 			log.Printf("New record found (url = %s) via %d, reporting\n", res.url.String(), res.source)
 
-			d.profiles[br.Id()] = res.url
+			d.profiles[br.ID()] = res.url
 
-			results <- br
-		} else if !(strings.Contains(currUrl.Host, res.url.Host) || strings.Contains(res.url.Host, currUrl.Host)) || currUrl.Path != res.url.Path || currUrl.Scheme != res.url.Scheme {
-			// We don't do a stright value comparison because UPnP returns the port, while nUPnP does not.
+			results <- *br
+		} else if !(strings.Contains(currURL.Host, res.url.Host) || strings.Contains(res.url.Host, currURL.Host)) || currURL.Path != res.url.Path || currURL.Scheme != res.url.Scheme {
+			// We don't do a straight value comparison because UPnP returns the port, while nUPnP does not.
 			// So we use the host comparisons to drop the port, then check path and scheme.
 			// This could likely be improved, possibly by adding :80 in the nUPnP detection scheme.
-			log.Printf("Bridge %s changed, new validation URL is %s (old was %s)\n", br.Id(), res.url.String(), currUrl.String())
+			log.Printf("Bridge %s changed, new validation URL is %s (old was %s)\n", br.ID(), res.url.String(), currURL.String())
 
 			// TODO: update bridge
 
 		}
 		// We don't need to log when we find the same bridge over and over.
 	}
+}
+
+func bridgeDescURLFromIP(ip string) (*url.URL, error) {
+	return url.Parse("http://" + ip + "/description.xml")
 }
 
 func runStatic(addrs []string, results chan result) {
@@ -95,11 +105,11 @@ func runStatic(addrs []string, results chan result) {
 			continue
 		}
 
-		url, _ := url.Parse("http://" + addr + "/description.xml")
+		url, _ := bridgeDescURLFromIP(addr)
 
 		r := result{
 			url:    url,
-			source: SOURCE_STATIC,
+			source: SourceStatic,
 		}
 		results <- r
 	}
@@ -119,16 +129,15 @@ func runNUPnP(results chan result) {
 			}
 
 			type entry struct {
-				Id                 string `json:"id"`
-				InternallIpAddress string `json:"internalipaddress"`
-				MacAddress         string `json:"macaddress"`
+				ID                 string `json:"id"`
+				InternallIPAddress string `json:"internalipaddress"`
+				MACAddress         string `json:"macaddress"`
 				Name               string `json:"name"`
 			}
 
 			var body []entry
 
 			err = json.NewDecoder(res.Body).Decode(&body)
-
 			if err != nil {
 				continue
 			}
@@ -137,15 +146,14 @@ func runNUPnP(results chan result) {
 				// From http://www.developers.meethue.com/documentation/hue-bridge-discovery
 				// We assume that the bridge will always have an XML description file present
 				// when the N-UPnP approach is used.
-				url, err := url.Parse("http://" + entry.InternallIpAddress + "/description.xml")
-
+				url, err := bridgeDescURLFromIP(entry.InternallIPAddress)
 				if err != nil {
 					continue
 				}
 
 				r := result{
 					url:    url,
-					source: SOURCE_NUPNP,
+					source: SourceNUPNP,
 				}
 				results <- r
 			}
@@ -177,7 +185,7 @@ func runSSDPReceiver(c <-chan ssdp.Update, results chan result) {
 
 		r := result{
 			url:    &u.Entry.Location,
-			source: SOURCE_UPNP,
+			source: SourceUPNP,
 		}
 		results <- r
 	}

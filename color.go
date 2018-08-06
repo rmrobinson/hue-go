@@ -1,4 +1,4 @@
-package hue_go
+package hue
 
 import (
 	"math"
@@ -72,9 +72,9 @@ func getClosestPointToPoints(a, b, p XY) XY {
 	ab := XY{X: b.X - a.X, Y: b.Y - a.Y}
 
 	ab2 := ab.X*ab.X + ab.Y*ab.Y
-	ap_ab := ap.X*ab.X + ap.Y*ab.Y
+	apAB := ap.X*ab.X + ap.Y*ab.Y
 
-	t := ap_ab / ab2
+	t := apAB / ab2
 
 	if t < 0.0 {
 		t = 0.0
@@ -110,9 +110,8 @@ func checkPointInColorPointsReach(p XY, colorPoints []XY) bool {
 
 	if s >= 0.0 && t >= 0.0 && s+t <= 1.0 {
 		return true
-	} else {
-		return false
 	}
+	return false
 }
 
 // FromHSB converts the specified HSB value into the RGB colour space.

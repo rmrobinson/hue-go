@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"net/url"
 
 	"github.com/rmrobinson/hue-go"
 )
@@ -16,26 +15,14 @@ var (
 func main() {
 	flag.Parse()
 
-	bridgeUrl, err := url.Parse("http://" + *bridgeAddr + "/description.xml")
-
-	if err != nil {
-		fmt.Printf("Unable to parse supplied bridge address: %s\n", err.Error())
-		return
-	}
-
-	var b hue_go.Bridge
-
-	err = b.Init(bridgeUrl)
-
+	b := hue.NewBridge(*username)
+	err := b.InitIP(*bridgeAddr)
 	if err != nil {
 		fmt.Printf("Unable to initialize supplied bridge address: %s\n", err.Error())
 		return
 	}
 
-	b.Username = *username
-
 	c, err := b.Config()
-
 	if err != nil {
 		fmt.Printf("Unable to retrieve bridge config: %s\n", err.Error())
 		return
@@ -44,7 +31,6 @@ func main() {
 	fmt.Printf("Bridge config: %+v\n", c)
 
 	lights, err := b.Lights()
-
 	if err != nil {
 		fmt.Printf("Unable to retrieve bridge lights: %s\n", err.Error())
 		return
@@ -55,7 +41,6 @@ func main() {
 	}
 
 	newLights, err := b.NewLights()
-
 	if err != nil {
 		fmt.Printf("Unable to retrieve new bridge lights: %s\n", err.Error())
 		return
@@ -66,7 +51,6 @@ func main() {
 	}
 
 	sensors, err := b.Sensors()
-
 	if err != nil {
 		fmt.Printf("Unable to retrieve bridge sensors: %s\n", err.Error())
 		return
@@ -77,7 +61,6 @@ func main() {
 	}
 
 	newSensors, err := b.NewSensors()
-
 	if err != nil {
 		fmt.Printf("Unable to retrieve new bridge sensors: %s\n", err.Error())
 		return
@@ -88,7 +71,7 @@ func main() {
 	}
 
 	/*
-		var lsa hue_go.LightStateArg
+		var lsa hue.LightStateArg
 		lsa.SetIsOn(false)
 
 		b.SetLightState("1", &lsa)
